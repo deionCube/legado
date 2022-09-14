@@ -3,11 +3,13 @@ package io.legado.app.ui.config
 import android.content.SharedPreferences
 import android.net.Uri
 import android.os.Bundle
+import android.text.Editable
 import android.text.InputType
 import android.view.Menu
 import android.view.MenuInflater
 import android.view.MenuItem
 import android.view.View
+import androidx.core.view.MenuProvider
 import androidx.documentfile.provider.DocumentFile
 import androidx.fragment.app.activityViewModels
 import androidx.lifecycle.lifecycleScope
@@ -32,16 +34,21 @@ import io.legado.app.lib.prefs.fragment.PreferenceFragment
 import io.legado.app.lib.theme.primaryColor
 import io.legado.app.ui.document.HandleFileContract
 import io.legado.app.ui.widget.dialog.TextDialog
+import io.legado.app.ui.widget.dialog.WaitDialog
 import io.legado.app.utils.*
+import kotlinx.coroutines.*
 import kotlinx.coroutines.Dispatchers.Main
-import kotlinx.coroutines.launch
 import splitties.init.appCtx
 import kotlin.collections.set
 
 class BackupConfigFragment : PreferenceFragment(),
-    SharedPreferences.OnSharedPreferenceChangeListener {
+    SharedPreferences.OnSharedPreferenceChangeListener,
+    MenuProvider {
 
     private val viewModel by activityViewModels<ConfigViewModel>()
+    private val waitDialog by lazy { WaitDialog(requireContext()) }
+    private var backupJob: Job? = null
+    private var restoreJob: Job? = null
 
     private val selectBackupPath = registerForActivityResult(HandleFileContract()) {
         it.uri?.let { uri ->
@@ -110,6 +117,14 @@ class BackupConfigFragment : PreferenceFragment(),
                     InputType.TYPE_TEXT_VARIATION_PASSWORD or InputType.TYPE_CLASS_TEXT
             }
         }
+        findPreference<EditTextPreference>(PreferKey.webDavDir)?.let {
+            it.setOnBindEditTextListener { editText ->
+                editText.text = AppConfig.webDavDir?.toEditable()
+            }
+            it.setOnPreferenceChangeListener { _, newValue ->
+                (newValue as String).isNotBlank()
+            }
+        }
         upPreferenceSummary(PreferKey.webDavUrl, getPrefString(PreferKey.webDavUrl))
         upPreferenceSummary(PreferKey.webDavAccount, getPrefString(PreferKey.webDavAccount))
         upPreferenceSummary(PreferKey.webDavPassword, getPrefString(PreferKey.webDavPassword))
@@ -124,23 +139,25 @@ class BackupConfigFragment : PreferenceFragment(),
         activity?.setTitle(R.string.backup_restore)
         preferenceManager.sharedPreferences?.registerOnSharedPreferenceChangeListener(this)
         listView.setEdgeEffectColor(primaryColor)
-        setHasOptionsMenu(true)
+        activity?.addMenuProvider(this, viewLifecycleOwner)
         if (!LocalConfig.backupHelpVersionIsLast) {
             showHelp()
         }
     }
 
-    override fun onCreateOptionsMenu(menu: Menu, inflater: MenuInflater) {
-        super.onCreateOptionsMenu(menu, inflater)
-        inflater.inflate(R.menu.backup_restore, menu)
+    override fun onCreateMenu(menu: Menu, menuInflater: MenuInflater) {
+        menuInflater.inflate(R.menu.backup_restore, menu)
         menu.applyTint(requireContext())
     }
 
-    override fun onOptionsItemSelected(item: MenuItem): Boolean {
-        when (item.itemId) {
-            R.id.menu_help -> showHelp()
+    override fun onMenuItemSelected(menuItem: MenuItem): Boolean {
+        when (menuItem.itemId) {
+            R.id.menu_help -> {
+                showHelp()
+                return true
+            }
         }
-        return super.onOptionsItemSelected(item)
+        return false
     }
 
     private fun showHelp() {
@@ -241,7 +258,13 @@ class BackupConfigFragment : PreferenceFragment(),
                 val uri = Uri.parse(backupPath)
                 val doc = DocumentFile.fromTreeUri(requireContext(), uri)
                 if (doc?.canWrite() == true) {
+                    waitDialog.setText("备份中…")
+                    waitDialog.setOnCancelListener {
+                        backupJob?.cancel()
+                    }
+                    waitDialog.show()
                     Coroutine.async {
+                        backupJob = coroutineContext[Job]
                         Backup.backup(requireContext(), backupPath)
                     }.onSuccess {
                         appCtx.toastOnUi(R.string.backup_success)
@@ -253,6 +276,8 @@ class BackupConfigFragment : PreferenceFragment(),
                                 it.localizedMessage
                             )
                         )
+                    }.onFinally(Main) {
+                        waitDialog.dismiss()
                     }
                 } else {
                     backupDir.launch()
@@ -268,7 +293,13 @@ class BackupConfigFragment : PreferenceFragment(),
             .addPermissions(*Permissions.Group.STORAGE)
             .rationale(R.string.tip_perm_request_storage)
             .onGranted {
+                waitDialog.setText("备份中…")
+                waitDialog.setOnCancelListener {
+                    backupJob?.cancel()
+                }
+                waitDialog.show()
                 Coroutine.async {
+                    backupJob = coroutineContext[Job]
                     AppConfig.backupPath = path
                     Backup.backup(requireContext(), path)
                 }.onSuccess {
@@ -276,13 +307,21 @@ class BackupConfigFragment : PreferenceFragment(),
                 }.onError {
                     AppLog.put("备份出错\n${it.localizedMessage}", it)
                     appCtx.toastOnUi(appCtx.getString(R.string.backup_fail, it.localizedMessage))
+                }.onFinally(Main) {
+                    waitDialog.dismiss()
                 }
             }
             .request()
     }
 
     fun restore() {
-        Coroutine.async(context = Main) {
+        waitDialog.setText(R.string.loading)
+        waitDialog.setOnCancelListener {
+            restoreJob?.cancel()
+        }
+        waitDialog.show()
+        Coroutine.async {
+            restoreJob = coroutineContext[Job]
             AppWebDav.showRestoreDialog(requireContext())
         }.onError {
             alert {
@@ -293,6 +332,8 @@ class BackupConfigFragment : PreferenceFragment(),
                 }
                 cancelButton()
             }
+        }.onFinally(Main) {
+            waitDialog.dismiss()
         }
     }
 

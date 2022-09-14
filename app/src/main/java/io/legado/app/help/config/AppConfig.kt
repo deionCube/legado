@@ -154,6 +154,12 @@ object AppConfig : SharedPreferences.OnSharedPreferenceChangeListener {
     val autoRefreshBook: Boolean
         get() = appCtx.getPrefBoolean(PreferKey.autoRefresh)
 
+    var enableReview: Boolean
+        get() = appCtx.getPrefBoolean(PreferKey.enableReview, false) && BuildConfig.DEBUG
+        set(value) {
+            appCtx.putPrefBoolean(PreferKey.enableReview, value)
+        }
+
     var threadCount: Int
         get() = appCtx.getPrefInt(PreferKey.threadCount, 16)
         set(value) {
@@ -310,7 +316,9 @@ object AppConfig : SharedPreferences.OnSharedPreferenceChangeListener {
 
     val recordLog get() = appCtx.getPrefBoolean(PreferKey.recordLog)
 
-    val loadCoverOnlyWifi = appCtx.getPrefBoolean(PreferKey.loadCoverOnlyWifi, false)
+    val loadCoverOnlyWifi get() = appCtx.getPrefBoolean(PreferKey.loadCoverOnlyWifi, false)
+
+    val showAddToShelfAlert get() = appCtx.getPrefBoolean(PreferKey.showAddToShelfAlert, true)
 
     val doublePageHorizontal: String?
         get() = appCtx.getPrefString(PreferKey.doublePageHorizontal)
@@ -319,6 +327,12 @@ object AppConfig : SharedPreferences.OnSharedPreferenceChangeListener {
         get() = appCtx.getPrefString("searchGroup") ?: ""
         set(value) {
             appCtx.putPrefString("searchGroup", value)
+        }
+
+    var pageTouchSlop: Int
+        get() = appCtx.getPrefInt(PreferKey.pageTouchSlop, 0)
+        set(value) {
+            appCtx.putPrefInt(PreferKey.pageTouchSlop, value)
         }
 
     private fun getPrefUserAgent(): String {
@@ -333,6 +347,17 @@ object AppConfig : SharedPreferences.OnSharedPreferenceChangeListener {
         get() = appCtx.getPrefInt(PreferKey.bitmapCacheSize, 50)
         set(value) {
             appCtx.putPrefInt(PreferKey.bitmapCacheSize, value)
+        }
+
+    var showReadTitleBarAddition : Boolean
+        get() = appCtx.getPrefBoolean(PreferKey.showReadTitleAddition, true)
+        set(value) {
+            appCtx.putPrefBoolean(PreferKey.showReadTitleAddition, value)
+        }
+    var readBarStyleFollowPage : Boolean
+        get() = appCtx.getPrefBoolean(PreferKey.readBarStyleFollowPage, false)
+        set(value) {
+            appCtx.putPrefBoolean(PreferKey.readBarStyleFollowPage, value)
         }
 }
 

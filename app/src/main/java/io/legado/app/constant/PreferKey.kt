@@ -32,6 +32,7 @@ object PreferKey {
     const val prevKeys = "prevKeyCodes"
     const val nextKeys = "nextKeyCodes"
     const val showDiscovery = "showDiscovery"
+    const val enableReview = "enableReview"
     const val showRss = "showRss"
     const val bookshelfLayout = "bookshelfLayout"
     const val bookshelfSort = "bookshelfSort"
@@ -108,6 +109,8 @@ object PreferKey {
     const val welcomeShowTextDark = "welcomeShowTextDark"
     const val welcomeShowIcon = "welcomeShowIcon"
     const val welcomeShowIconDark = "welcomeShowIconDark"
+    const val pageTouchSlop = "pageTouchSlop"
+    const val showAddToShelfAlert = "showAddToShelfAlert"
 
     const val cPrimary = "colorPrimary"
     const val cAccent = "colorAccent"
@@ -122,5 +125,7 @@ object PreferKey {
     const val cNBBackground = "colorBottomBackgroundNight"
     const val bgImageN = "backgroundImageNight"
     const val bgImageNBlurring = "backgroundImageNightBlurring"
+    const val showReadTitleAddition = "showReadTitleAddition"
+    const val readBarStyleFollowPage = "readBarStyleFollowPage"
 
 }

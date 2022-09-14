@@ -2,10 +2,11 @@ package io.legado.app.model.localBook
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.net.Uri
 import android.text.TextUtils
+import io.legado.app.constant.AppLog
 import io.legado.app.data.entities.Book
 import io.legado.app.data.entities.BookChapter
+import io.legado.app.help.BookHelp
 import io.legado.app.utils.*
 import me.ag2s.epublib.domain.EpubBook
 import me.ag2s.epublib.domain.Resource
@@ -15,13 +16,12 @@ import org.jsoup.Jsoup
 import org.jsoup.nodes.Element
 import org.jsoup.select.Elements
 import splitties.init.appCtx
-
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
 import java.io.InputStream
+import java.net.URLDecoder
 import java.nio.charset.Charset
-import java.util.zip.ZipFile
 
 class EpubFile(var book: Book) {
 
@@ -96,36 +96,33 @@ class EpubFile(var book: Book) {
                 }
             }
         } catch (e: Exception) {
+            AppLog.put("加载书籍封面失败\n${e.localizedMessage}", e)
             e.printOnDebug()
         }
     }
 
-    /*重写epub文件解析代码，直接读出压缩包文件生成Resources给epublib，这样的好处是可以逐一修改某些文件的格式错误*/
+    /**
+     * 重写epub文件解析代码，直接读出压缩包文件生成Resources给epublib，这样的好处是可以逐一修改某些文件的格式错误
+     */
     private fun readEpub(): EpubBook? {
-        try {
-            val uri = Uri.parse(book.bookUrl)
-            return if (uri.isContentScheme()) {
-                //高版本的手机内存一般足够大，直接加载到内存中最快
-                EpubReader().readEpub(LocalBook.getBookInputStream(book), "utf-8")
-            } else {
-                //低版本的使用懒加载
-                EpubReader().readEpubLazy(ZipFile(uri.path), "utf-8")
-
-            }
-
-
-        } catch (e: Exception) {
-            e.printOnDebug()
-        }
-        return null
+        return kotlin.runCatching {
+            //ContentScheme拷贝到私有文件夹采用懒加载防止OOM
+            val zipFile = BookHelp.getEpubFile(book)
+            EpubReader().readEpubLazy(zipFile, "utf-8")
+        }.onFailure {
+            AppLog.put("读取Epub文件失败\n${it.localizedMessage}", it)
+            it.printOnDebug()
+        }.getOrNull()
     }
 
     private fun getContent(chapter: BookChapter): String? {
-         /**
-          * <image width="1038" height="670" xlink:href="..."/>
-          * ...titlepage.xhtml
-          */
-        if (chapter.url.contains("titlepage.xhtml")) {
+        /**
+         * <image width="1038" height="670" xlink:href="..."/>
+         * ...titlepage.xhtml
+         */
+        if (chapter.url.contains("titlepage.xhtml") ||
+            chapter.url.contains("cover.xhtml")
+        ) {
             return "<img src=\"cover.jpeg\" />"
         }
         /*获取当前章节文本*/
@@ -141,10 +138,10 @@ class EpubFile(var book: Book) {
                 if (chapter.url.substringBeforeLast("#") == res.href) {
                     elements.add(getBody(res, startFragmentId, endFragmentId))
                     isChapter = true
-                   /**
-                    * fix https://github.com/gedoor/legado/issues/1927 加载全部内容的bug
-                    * content src text/000001.html（当前章节）
--                   * content src text/000001.html#toc_id_x (下一章节）
+                    /**
+                     * fix https://github.com/gedoor/legado/issues/1927 加载全部内容的bug
+                     * content src text/000001.html（当前章节）
+                    -                   * content src text/000001.html#toc_id_x (下一章节）
                      */
                     if (res.href == nextUrl?.substringBeforeLast("#")) break
                 } else if (isChapter) {
@@ -155,6 +152,8 @@ class EpubFile(var book: Book) {
                     elements.add(getBody(res, startFragmentId, endFragmentId))
                 }
             }
+            //title标签中的内容不需要显示在正文中，去除
+            elements.select("title").remove()
             var html = elements.outerHtml()
             val tag = Book.rubyTag
             if (book.getDelTag(tag)) {
@@ -196,7 +195,7 @@ class EpubFile(var book: Book) {
 
     private fun getImage(href: String): InputStream? {
         if (href == "cover.jpeg") return epubBook?.coverImage?.inputStream
-        val abHref = href.replace("../", "")
+        val abHref = URLDecoder.decode(href.replace("../", ""), "UTF-8")
         return epubBook?.resources?.getByHref(abHref)?.inputStream
     }
 
@@ -265,8 +264,6 @@ class EpubFile(var book: Book) {
                 }
             }
         }
-        book.latestChapterTitle = chapterList.lastOrNull()?.title
-        book.totalChapterNum = chapterList.size
         return chapterList
     }
 

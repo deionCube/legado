@@ -14,7 +14,7 @@ import io.legado.app.model.webBook.WebBook
 import io.legado.app.service.BaseReadAloudService
 import io.legado.app.ui.book.read.page.entities.TextChapter
 import io.legado.app.ui.book.read.page.provider.ChapterProvider
-import io.legado.app.utils.msg
+import io.legado.app.utils.stackTraceStr
 import io.legado.app.utils.toastOnUi
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers.IO
@@ -107,7 +107,9 @@ object ReadBook : CoroutineScope by MainScope() {
 
     fun uploadProgress() {
         book?.let {
-            AppWebDav.uploadBookProgress(it)
+            Coroutine.async {
+                AppWebDav.uploadBookProgress(it)
+            }
         }
     }
 
@@ -115,6 +117,7 @@ object ReadBook : CoroutineScope by MainScope() {
         Coroutine.async {
             readRecord.readTime = readRecord.readTime + System.currentTimeMillis() - readStartTime
             readStartTime = System.currentTimeMillis()
+            readRecord.lastRead = System.currentTimeMillis()
             if (AppConfig.enableReadRecord) {
                 appDb.readRecordDao.insert(readRecord)
             }
@@ -128,10 +131,18 @@ object ReadBook : CoroutineScope by MainScope() {
         }
     }
 
-    fun moveToNextPage() {
-        durChapterPos = curTextChapter?.getNextPageLength(durChapterPos) ?: durChapterPos
-        callBack?.upContent()
-        saveRead()
+    fun moveToNextPage(): Boolean {
+        var hasNextPage = false
+        curTextChapter?.let {
+            val nextPagePos = it.getNextPageLength(durChapterPos)
+            if (nextPagePos >= 0) {
+                hasNextPage = true
+                durChapterPos = nextPagePos
+                callBack?.upContent()
+                saveRead()
+            }
+        }
+        return hasNextPage
     }
 
     fun moveToNextChapter(upContent: Boolean): Boolean {
@@ -307,8 +318,9 @@ object ReadBook : CoroutineScope by MainScope() {
         if (book != null && bookSource != null) {
             CacheBook.getOrCreate(bookSource, book).download(scope, chapter)
         } else if (book != null) {
+            val msg = if (book.isLocalBook()) "无内容" else "没有书源"
             contentLoadFinish(
-                book, chapter, "没有书源", resetPageOffset = resetPageOffset
+                book, chapter, "加载正文失败\n$msg", resetPageOffset = resetPageOffset
             ) {
                 success?.invoke()
             }
@@ -375,7 +387,7 @@ object ReadBook : CoroutineScope by MainScope() {
             }
         }.onError {
             AppLog.put("ChapterProvider ERROR", it)
-            appCtx.toastOnUi("ChapterProvider ERROR:\n${it.msg}")
+            appCtx.toastOnUi("ChapterProvider ERROR:\n${it.stackTraceStr}")
         }.onSuccess {
             success?.invoke()
         }

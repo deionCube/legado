@@ -15,6 +15,7 @@ import io.legado.app.data.entities.BookSource
 import io.legado.app.data.entities.rule.ExploreKind
 import io.legado.app.databinding.ItemFilletTextBinding
 import io.legado.app.databinding.ItemFindBookBinding
+import io.legado.app.help.config.SourceConfig
 import io.legado.app.help.coroutine.Coroutine
 import io.legado.app.lib.theme.accentColor
 import io.legado.app.ui.login.SourceLoginActivity
@@ -77,7 +78,7 @@ class ExploreAdapter(context: Context, val callBack: CallBack) :
     }
 
     private fun upKindList(flexbox: FlexboxLayout, sourceUrl: String, kinds: List<ExploreKind>) {
-        if (!kinds.isNullOrEmpty()) kotlin.runCatching {
+        if (kinds.isNotEmpty()) kotlin.runCatching {
             recyclerFlexbox(flexbox)
             flexbox.visible()
             kinds.forEach { kind ->
@@ -168,12 +169,13 @@ class ExploreAdapter(context: Context, val callBack: CallBack) :
                     putExtra("key", source.bookSourceUrl)
                 }
                 R.id.menu_refresh -> Coroutine.async(callBack.scope) {
-                    ACache.get(context, "explore").remove(source.bookSourceUrl)
+                    ACache.get("explore").remove(source.bookSourceUrl)
                 }.onSuccess {
                     callBack.refreshData()
                 }
                 R.id.menu_del -> Coroutine.async(callBack.scope) {
                     appDb.bookSourceDao.delete(source)
+                    SourceConfig.removeSource(source.bookSourceUrl)
                 }
             }
             true

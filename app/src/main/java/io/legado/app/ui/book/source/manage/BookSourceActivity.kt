@@ -1,10 +1,10 @@
 package io.legado.app.ui.book.source.manage
 
 import android.annotation.SuppressLint
+import android.content.Context
+import android.hardware.display.DisplayManager
 import android.os.Bundle
-import android.view.Menu
-import android.view.MenuItem
-import android.view.SubMenu
+import android.view.*
 import androidx.activity.viewModels
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.widget.PopupMenu
@@ -15,7 +15,6 @@ import com.google.android.material.snackbar.Snackbar
 import io.legado.app.R
 import io.legado.app.base.VMBaseActivity
 import io.legado.app.constant.AppLog
-import io.legado.app.constant.AppPattern
 import io.legado.app.constant.EventBus
 import io.legado.app.data.appDb
 import io.legado.app.data.entities.BookSource
@@ -69,6 +68,9 @@ class BookSourceActivity : VMBaseActivity<ActivityBookSourceBinding, BookSourceV
     private var sort = Sort.Default
     private var sortAscending = true
     private var snackBar: Snackbar? = null
+    private val displayManager by lazy {
+        getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
+    }
     private val qrResult = registerForActivityResult(QrCodeResult()) {
         it ?: return@registerForActivityResult
         showDialogFragment(ImportBookSourceDialog(it))
@@ -108,6 +110,7 @@ class BookSourceActivity : VMBaseActivity<ActivityBookSourceBinding, BookSourceV
         upBookSource()
         initLiveDataGroup()
         initSelectActionBar()
+        resumeCheckSource()
         if (!LocalConfig.bookSourcesHelpVersionIsLast) {
             showHelp()
         }
@@ -181,6 +184,9 @@ class BookSourceActivity : VMBaseActivity<ActivityBookSourceBinding, BookSourceV
             R.id.menu_group_login -> {
                 searchView.setQuery(getString(R.string.need_login), true)
             }
+            R.id.menu_group_null -> {
+                searchView.setQuery(getString(R.string.no_group), true)
+            }
             R.id.menu_help -> showHelp()
         }
         if (item.groupId == R.id.source_group) {
@@ -228,6 +234,9 @@ class BookSourceActivity : VMBaseActivity<ActivityBookSourceBinding, BookSourceV
                 }
                 searchKey == getString(R.string.need_login) -> {
                     appDb.bookSourceDao.flowLogin()
+                }
+                searchKey == getString(R.string.no_group) -> {
+                    appDb.bookSourceDao.flowNoGroup()
                 }
                 searchKey.startsWith("group:") -> {
                     val key = searchKey.substringAfter("group:")
@@ -296,11 +305,9 @@ class BookSourceActivity : VMBaseActivity<ActivityBookSourceBinding, BookSourceV
 
     private fun initLiveDataGroup() {
         launch {
-            appDb.bookSourceDao.flowGroup().conflate().collect {
+            appDb.bookSourceDao.flowGroups().conflate().collect {
                 groups.clear()
-                it.forEach { group ->
-                    groups.addAll(group.splitNotBlank(AppPattern.splitGroupRegex))
-                }
+                groups.addAll(it)
                 upGroupMenu()
             }
         }
@@ -320,7 +327,7 @@ class BookSourceActivity : VMBaseActivity<ActivityBookSourceBinding, BookSourceV
 
     override fun onClickSelectBarMainAction() {
         alert(titleResource = R.string.draw, messageResource = R.string.sure_del) {
-            okButton { viewModel.del(*adapter.selection.toTypedArray()) }
+            yesButton { viewModel.del(*adapter.selection.toTypedArray()) }
             noButton()
         }
     }
@@ -352,6 +359,7 @@ class BookSourceActivity : VMBaseActivity<ActivityBookSourceBinding, BookSourceV
             R.id.menu_share_source -> viewModel.saveToFile(adapter.selection) {
                 share(it)
             }
+            R.id.menu_check_selected_interval -> adapter.checkSelectedInterval()
         }
         return true
     }
@@ -365,6 +373,7 @@ class BookSourceActivity : VMBaseActivity<ActivityBookSourceBinding, BookSourceV
             }
             customView { alertBinding.root }
             okButton {
+                keepScreenOn(true)
                 alertBinding.editView.text?.toString()?.let {
                     if (it.isNotEmpty()) {
                         CheckSource.keyword = it
@@ -383,6 +392,15 @@ class BookSourceActivity : VMBaseActivity<ActivityBookSourceBinding, BookSourceV
         dialog.getButton(AlertDialog.BUTTON_NEUTRAL)?.setOnClickListener {
             showDialogFragment<CheckSourceConfig>()
         }
+    }
+
+    private fun resumeCheckSource() {
+        if (!Debug.isChecking) {
+            return
+        }
+        keepScreenOn(true)
+        CheckSource.resume(this)
+        checkMessageRefreshJob(0, 0).start()
     }
 
     @SuppressLint("InflateParams")
@@ -427,16 +445,14 @@ class BookSourceActivity : VMBaseActivity<ActivityBookSourceBinding, BookSourceV
 
     private fun upGroupMenu() = groupMenu?.let { menu ->
         menu.removeGroup(R.id.source_group)
-        groups.sortedWith { o1, o2 ->
-            o1.cnCompare(o2)
-        }.map {
+        groups.forEach {
             menu.add(R.id.source_group, Menu.NONE, Menu.NONE, it)
         }
     }
 
     @SuppressLint("InflateParams")
     private fun showImportDialog() {
-        val aCache = ACache.get(this, cacheDir = false)
+        val aCache = ACache.get(cacheDir = false)
         val cacheUrls: MutableList<String> = aCache
             .getAsString(importRecordKey)
             ?.splitNotBlank(",")
@@ -482,6 +498,7 @@ class BookSourceActivity : VMBaseActivity<ActivityBookSourceBinding, BookSourceV
             }
         }
         observeEvent<Int>(EventBus.CHECK_SOURCE_DONE) {
+            keepScreenOn(false)
             snackBar?.dismiss()
             snackBar = null
             groups.map { group ->
@@ -501,15 +518,46 @@ class BookSourceActivity : VMBaseActivity<ActivityBookSourceBinding, BookSourceV
                     delay(300L)
                 }
             }.collect {
-                adapter.notifyItemRangeChanged(
-                    firstItem,
-                    lastItem + 1,
-                    bundleOf(Pair("checkSourceMessage", null))
-                )
+                if (isScreenOn()) {
+                    if (lastItem == 0) {
+                        adapter.notifyItemRangeChanged(
+                            0,
+                            adapter.itemCount,
+                            bundleOf(Pair("checkSourceMessage", null))
+                        )
+                    } else {
+                        adapter.notifyItemRangeChanged(
+                            firstItem,
+                            lastItem + 1,
+                            bundleOf(Pair("checkSourceMessage", null))
+                        )
+                    }
+                }
                 if (!it) {
                     this.cancel()
                 }
             }
+        }
+    }
+
+    /**
+     * 保持亮屏
+     */
+    private fun keepScreenOn(on: Boolean) {
+        val isScreenOn =
+            (window.attributes.flags and WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) != 0
+        if (on == isScreenOn) return
+        if (on) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        } else {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+    }
+
+    private fun isScreenOn(): Boolean {
+        return displayManager.displays.any {
+            it ?: return@any false
+            it.state != Display.STATE_OFF
         }
     }
 
@@ -530,7 +578,13 @@ class BookSourceActivity : VMBaseActivity<ActivityBookSourceBinding, BookSourceV
     }
 
     override fun del(bookSource: BookSource) {
-        viewModel.del(bookSource)
+        alert(R.string.draw) {
+            setMessage(getString(R.string.sure_del) + "\n" + bookSource.bookSourceName)
+            noButton()
+            yesButton {
+                viewModel.del(bookSource)
+            }
+        }
     }
 
     override fun update(vararg bookSource: BookSource) {

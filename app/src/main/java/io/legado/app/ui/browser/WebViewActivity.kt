@@ -21,6 +21,7 @@ import io.legado.app.help.SourceVerificationHelp
 import io.legado.app.help.config.AppConfig
 import io.legado.app.help.http.CookieStore
 import io.legado.app.lib.dialogs.SelectItem
+import io.legado.app.lib.theme.accentColor
 import io.legado.app.model.Download
 import io.legado.app.ui.association.OnLineImportActivity
 import io.legado.app.ui.document.HandleFileContract
@@ -37,13 +38,14 @@ class WebViewActivity : VMBaseActivity<ActivityWebViewBinding, WebViewModel>() {
     private var webPic: String? = null
     private val saveImage = registerForActivityResult(HandleFileContract()) {
         it.uri?.let { uri ->
-            ACache.get(this).put(imagePathKey, uri.toString())
+            ACache.get().put(imagePathKey, uri.toString())
             viewModel.saveImage(webPic, uri.toString())
         }
     }
 
     override fun onActivityCreated(savedInstanceState: Bundle?) {
         binding.titleBar.title = intent.getStringExtra("title") ?: getString(R.string.loading)
+        binding.titleBar.subtitle = intent.getStringExtra("sourceName")
         viewModel.initData(intent) {
             val url = viewModel.baseUrl
             val headerMap = viewModel.headerMap
@@ -81,6 +83,7 @@ class WebViewActivity : VMBaseActivity<ActivityWebViewBinding, WebViewModel>() {
 
     @SuppressLint("JavascriptInterface", "SetJavaScriptEnabled")
     private fun initWebView(url: String, headerMap: HashMap<String, String>) {
+        binding.progressBar.fontColor = accentColor
         binding.webView.webChromeClient = CustomWebChromeClient()
         binding.webView.webViewClient = CustomWebViewClient()
         binding.webView.settings.apply {
@@ -122,12 +125,14 @@ class WebViewActivity : VMBaseActivity<ActivityWebViewBinding, WebViewModel>() {
     private fun upWebViewTheme() {
         if (AppConfig.isNightTheme) {
             if (WebViewFeature.isFeatureSupported(WebViewFeature.FORCE_DARK_STRATEGY)) {
+                @Suppress("DEPRECATION")
                 WebSettingsCompat.setForceDarkStrategy(
                     binding.webView.settings,
                     WebSettingsCompat.DARK_STRATEGY_PREFER_WEB_THEME_OVER_USER_AGENT_DARKENING
                 )
             }
             if (WebViewFeature.isFeatureSupported(WebViewFeature.FORCE_DARK)) {
+                @Suppress("DEPRECATION")
                 WebSettingsCompat.setForceDark(
                     binding.webView.settings,
                     WebSettingsCompat.FORCE_DARK_ON
@@ -138,7 +143,7 @@ class WebViewActivity : VMBaseActivity<ActivityWebViewBinding, WebViewModel>() {
 
     private fun saveImage(webPic: String) {
         this.webPic = webPic
-        val path = ACache.get(this).getAsString(imagePathKey)
+        val path = ACache.get().getAsString(imagePathKey)
         if (path.isNullOrEmpty()) {
             selectSaveFolder()
         } else {
@@ -147,7 +152,7 @@ class WebViewActivity : VMBaseActivity<ActivityWebViewBinding, WebViewModel>() {
     }
     private fun selectSaveFolder() {
         val default = arrayListOf<SelectItem<Int>>()
-        val path = ACache.get(this).getAsString(imagePathKey)
+        val path = ACache.get().getAsString(imagePathKey)
         if (!path.isNullOrEmpty()) {
             default.add(SelectItem(path, -1))
         }
@@ -190,6 +195,12 @@ class WebViewActivity : VMBaseActivity<ActivityWebViewBinding, WebViewModel>() {
     }
 
     inner class CustomWebChromeClient : WebChromeClient() {
+
+        override fun onProgressChanged(view: WebView?, newProgress: Int) {
+            super.onProgressChanged(view, newProgress)
+            binding.progressBar.setDurProgress(newProgress)
+            binding.progressBar.gone(newProgress == 100)
+        }
 
         override fun onShowCustomView(view: View?, callback: CustomViewCallback?) {
             requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR

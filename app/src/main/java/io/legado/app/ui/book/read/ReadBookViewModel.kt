@@ -2,6 +2,8 @@ package io.legado.app.ui.book.read
 
 import android.app.Application
 import android.content.Intent
+import android.net.Uri
+import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.viewModelScope
 import io.legado.app.R
@@ -21,17 +23,19 @@ import io.legado.app.help.config.AppConfig
 import io.legado.app.help.coroutine.Coroutine
 import io.legado.app.model.ReadAloud
 import io.legado.app.model.ReadBook
+import io.legado.app.model.analyzeRule.AnalyzeRule
 import io.legado.app.model.localBook.LocalBook
 import io.legado.app.model.webBook.WebBook
 import io.legado.app.service.BaseReadAloudService
 import io.legado.app.ui.book.read.page.entities.TextChapter
 import io.legado.app.ui.book.read.page.provider.ImageProvider
 import io.legado.app.ui.book.searchContent.SearchResult
-import io.legado.app.utils.msg
-import io.legado.app.utils.postEvent
-import io.legado.app.utils.toStringArray
-import io.legado.app.utils.toastOnUi
+import io.legado.app.utils.*
 import kotlinx.coroutines.Dispatchers.IO
+import kotlinx.coroutines.launch
+import java.io.File
+import java.io.FileInputStream
+import java.io.FileOutputStream
 
 /**
  * 阅读界面数据处理
@@ -40,6 +44,8 @@ class ReadBookViewModel(application: Application) : BaseViewModel(application) {
     val permissionDenialLiveData = MutableLiveData<Int>()
     var isInitFinish = false
     var searchContentQuery = ""
+    var searchResultList: List<SearchResult>? = null
+    var searchResultIndex: Int = 0
     private var changeSourceCoroutine: Coroutine<*>? = null
 
     /**
@@ -144,16 +150,29 @@ class ReadBookViewModel(application: Application) : BaseViewModel(application) {
             }
         } else {
             ReadBook.bookSource?.let {
-                WebBook.getChapterList(viewModelScope, it, book)
-                    .onSuccess(IO) { cList ->
-                        appDb.bookChapterDao.insert(*cList.toTypedArray())
-                        appDb.bookDao.update(book)
-                        ReadBook.chapterSize = cList.size
-                        ReadBook.upMsg(null)
-                        ReadBook.loadContent(resetPageOffset = true)
-                    }.onError {
-                        ReadBook.upMsg(context.getString(R.string.error_load_toc))
+                viewModelScope.launch(IO) {
+                    val oldBook = book.copy()
+                    val preUpdateJs = it.ruleToc?.preUpdateJs
+                    if (!preUpdateJs.isNullOrBlank()) {
+                        AnalyzeRule(book, it).evalJS(preUpdateJs)
                     }
+                    WebBook.getChapterList(viewModelScope, it, book)
+                        .onSuccess(IO) { cList ->
+                            if (oldBook.bookUrl == book.bookUrl) {
+                                appDb.bookDao.update(book)
+                            } else {
+                                appDb.bookDao.insert(book)
+                                BookHelp.updateCacheFolder(oldBook, book)
+                            }
+                            appDb.bookChapterDao.delByBook(oldBook.bookUrl)
+                            appDb.bookChapterDao.insert(*cList.toTypedArray())
+                            ReadBook.chapterSize = cList.size
+                            ReadBook.upMsg(null)
+                            ReadBook.loadContent(resetPageOffset = true)
+                        }.onError {
+                            ReadBook.upMsg(context.getString(R.string.error_load_toc))
+                        }
+                }
             }
         }
     }
@@ -172,6 +191,8 @@ class ReadBookViewModel(application: Application) : BaseViewModel(application) {
             } else {
                 throw NoStackTraceException("进度同步未启用")
             }
+        }.onError {
+            AppLog.put("拉取阅读进度失败", it)
         }.onSuccess { progress ->
             if (progress.durChapterIndex < book.durChapterIndex ||
                 (progress.durChapterIndex == book.durChapterIndex
@@ -180,6 +201,7 @@ class ReadBookViewModel(application: Application) : BaseViewModel(application) {
                 alertSync?.invoke(progress)
             } else {
                 ReadBook.setProgress(progress)
+                AppLog.put("自动同步阅读进度成功")
             }
         }
 
@@ -197,7 +219,6 @@ class ReadBookViewModel(application: Application) : BaseViewModel(application) {
                 toc.first()
             }
             WebBook.getContentAwait(
-                this,
                 bookSource = source,
                 book = book,
                 bookChapter = toc[book.durChapterIndex],
@@ -226,18 +247,19 @@ class ReadBookViewModel(application: Application) : BaseViewModel(application) {
             sources.forEach { source ->
                 WebBook.preciseSearchAwait(this, source, name, author).getOrNull()?.let { book ->
                     if (book.tocUrl.isEmpty()) {
-                        WebBook.getBookInfoAwait(this, source, book)
+                        WebBook.getBookInfoAwait(source, book)
                     }
-                    val toc = WebBook.getChapterListAwait(this, source, book).getOrThrow()
+                    val toc = WebBook.getChapterListAwait(source, book).getOrThrow()
                     changeTo(source, book, toc)
                     return@execute
                 }
             }
-            throw NoStackTraceException("自动换源失败")
+            throw NoStackTraceException("没有搜索到 ${name}(${author})")
         }.onStart {
             ReadBook.upMsg(context.getString(R.string.source_auto_changing))
         }.onError {
-            context.toastOnUi(it.msg)
+            AppLog.put("自动换源失败\n${it.localizedMessage}", it)
+            context.toastOnUi("自动换源失败\n${it.localizedMessage}")
         }.onFinally {
             ReadBook.upMsg(null)
         }
@@ -344,53 +366,54 @@ class ReadBookViewModel(application: Application) : BaseViewModel(application) {
         // calculate search result's pageIndex
         val pages = textChapter.pages
         val content = textChapter.getContent()
+        val queryLength = searchContentQuery.length
 
         var count = 0
         var index = content.indexOf(searchContentQuery)
         while (count != searchResult.resultCountWithinChapter) {
-            index = content.indexOf(searchContentQuery, index + 1)
+            index = content.indexOf(searchContentQuery, index + queryLength)
             count += 1
         }
         val contentPosition = index
         var pageIndex = 0
         var length = pages[pageIndex].text.length
-        while (length < contentPosition) {
+        while (length < contentPosition && pageIndex + 1 < pages.size) {
             pageIndex += 1
-            if (pageIndex > pages.size) {
-                pageIndex = pages.size
-                break
-            }
             length += pages[pageIndex].text.length
         }
 
         // calculate search result's lineIndex
         val currentPage = pages[pageIndex]
+        val curTextLines = currentPage.lines
         var lineIndex = 0
-        length = length - currentPage.text.length + currentPage.textLines[lineIndex].text.length
-        while (length < contentPosition) {
+        var curLine = curTextLines[lineIndex]
+        length = length - currentPage.text.length + curLine.text.length
+        if (curLine.isParagraphEnd) length++
+        while (length < contentPosition && lineIndex + 1 < curTextLines.size) {
             lineIndex += 1
-            if (lineIndex > currentPage.textLines.size) {
-                lineIndex = currentPage.textLines.size
-                break
-            }
-            length += currentPage.textLines[lineIndex].text.length
+            curLine = curTextLines[lineIndex]
+            length += curLine.text.length
+            if (curLine.isParagraphEnd) length++
         }
 
         // charIndex
-        val currentLine = currentPage.textLines[lineIndex]
-        length -= currentLine.text.length
+        val currentLine = currentPage.lines[lineIndex]
+        var curLineLength = currentLine.text.length
+        if (currentLine.isParagraphEnd) curLineLength++
+        length -= curLineLength
+
         val charIndex = contentPosition - length
         var addLine = 0
         var charIndex2 = 0
         // change line
-        if ((charIndex + searchContentQuery.length) > currentLine.text.length) {
+        if ((charIndex + queryLength) > curLineLength) {
             addLine = 1
-            charIndex2 = charIndex + searchContentQuery.length - currentLine.text.length - 1
+            charIndex2 = charIndex + queryLength - curLineLength - 1
         }
         // changePage
-        if ((lineIndex + addLine + 1) > currentPage.textLines.size) {
+        if ((lineIndex + addLine + 1) > currentPage.lines.size) {
             addLine = -1
-            charIndex2 = charIndex + searchContentQuery.length - currentLine.text.length - 1
+            charIndex2 = charIndex + queryLength - curLineLength - 1
         }
         return arrayOf(pageIndex, lineIndex, charIndex, addLine, charIndex2)
     }
@@ -404,6 +427,34 @@ class ReadBookViewModel(application: Application) : BaseViewModel(application) {
             }
         }.onFinally {
             ReadBook.loadContent(false)
+        }
+    }
+
+    @Suppress("BlockingMethodInNonBlockingContext")
+    fun saveImage(src: String?, uri: Uri) {
+        src ?: return
+        val book = ReadBook.book ?: return
+        execute {
+            val image = BookHelp.getImage(book, src)
+            FileInputStream(image).use { input ->
+                if (uri.isContentScheme()) {
+                    DocumentFile.fromTreeUri(context, uri)?.let { doc ->
+                        val imageDoc = DocumentUtils.createFileIfNotExist(doc, image.name)!!
+                        context.contentResolver.openOutputStream(imageDoc.uri)!!.use { output ->
+                            input.copyTo(output)
+                        }
+                    }
+                } else {
+                    val dir = File(uri.path ?: uri.toString())
+                    val file = FileUtils.createFileIfNotExist(dir, image.name)
+                    FileOutputStream(file).use { output ->
+                        input.copyTo(output)
+                    }
+                }
+            }
+        }.onError {
+            AppLog.put("保存图片出错\n${it.localizedMessage}", it)
+            context.toastOnUi("保存图片出错\n${it.localizedMessage}")
         }
     }
 

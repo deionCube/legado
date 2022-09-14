@@ -10,7 +10,6 @@ import io.legado.app.help.SourceAnalyzer
 import io.legado.app.utils.*
 import kotlinx.parcelize.IgnoredOnParcel
 import kotlinx.parcelize.Parcelize
-import splitties.init.appCtx
 import java.io.InputStream
 
 @Suppress("unused")
@@ -38,7 +37,9 @@ data class BookSource(
     // 是否启用
     var enabled: Boolean = true,
     // 启用发现
-    var enabledExplore: Boolean = true,
+    var enabledExplore: Boolean = false,
+    // 启用段评
+    var enabledReview: Boolean? = false,
     // 启用okhttp CookieJAr 自动保存每次请求的cookie
     @ColumnInfo(defaultValue = "0")
     override var enabledCookieJar: Boolean? = false,
@@ -75,7 +76,9 @@ data class BookSource(
     // 目录页规则
     var ruleToc: TocRule? = null,
     // 正文页规则
-    var ruleContent: ContentRule? = null
+    var ruleContent: ContentRule? = null,
+    // 段评规则
+    var ruleReview: ReviewRule? = null
 ) : Parcelable, BaseSource {
 
     override fun getTag(): String {
@@ -98,7 +101,7 @@ data class BookSource(
                 if (exploreUrl.startsWith("<js>", false)
                     || exploreUrl.startsWith("@js:", false)
                 ) {
-                    val aCache = ACache.get(appCtx, "explore")
+                    val aCache = ACache.get("explore")
                     ruleStr = aCache.getAsString(bookSourceUrl) ?: ""
                     if (ruleStr.isBlank()) {
                         val jsStr = if (exploreUrl.startsWith("@")) {
@@ -168,6 +171,13 @@ data class BookSource(
         ruleContent?.let { return it }
         val rule = ContentRule()
         ruleContent = rule
+        return rule
+    }
+
+    fun getReviewRule(): ReviewRule {
+        ruleReview?.let { return it }
+        val rule = ReviewRule()
+        ruleReview = rule
         return rule
     }
 
@@ -303,6 +313,14 @@ data class BookSource(
         @TypeConverter
         fun stringToContentRule(json: String?) =
             GSON.fromJsonObject<ContentRule>(json).getOrNull()
+
+        @TypeConverter
+        fun stringToReviewRule(json: String?) =
+            GSON.fromJsonObject<ReviewRule>(json).getOrNull()
+
+        @TypeConverter
+        fun reviewRuleToString(reviewRule: ReviewRule?): String =
+            GSON.toJson(reviewRule)
 
     }
 }
