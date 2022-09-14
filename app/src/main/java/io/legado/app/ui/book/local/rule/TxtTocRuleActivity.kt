@@ -88,7 +88,13 @@ class TxtTocRuleActivity : VMBaseActivity<ActivityTxtTocRuleBinding, TxtTocRuleV
     }
 
     override fun del(source: TxtTocRule) {
-        viewModel.del(source)
+        alert(R.string.draw) {
+            setMessage(getString(R.string.sure_del) + "\n" + source.name)
+            noButton()
+            yesButton {
+                viewModel.del(source)
+            }
+        }
     }
 
     override fun edit(source: TxtTocRule) {
@@ -97,12 +103,14 @@ class TxtTocRuleActivity : VMBaseActivity<ActivityTxtTocRuleBinding, TxtTocRuleV
             alertBinding.apply {
                 tvRuleName.setText(source.name)
                 tvRuleRegex.setText(source.rule)
+                tvRuleExample.setText(source.example)
             }
             customView { alertBinding.root }
             okButton {
                 alertBinding.apply {
                     source.name = tvRuleName.text.toString()
                     source.rule = tvRuleRegex.text.toString()
+                    source.example = tvRuleExample.text.toString()
                     viewModel.save(source)
                 }
             }
@@ -149,14 +157,14 @@ class TxtTocRuleActivity : VMBaseActivity<ActivityTxtTocRuleBinding, TxtTocRuleV
 
     private fun delSourceDialog() {
         alert(titleResource = R.string.draw, messageResource = R.string.sure_del) {
-            okButton { viewModel.del(*adapter.selection.toTypedArray()) }
+            yesButton { viewModel.del(*adapter.selection.toTypedArray()) }
             noButton()
         }
     }
 
     @SuppressLint("InflateParams")
     private fun showImportDialog() {
-        val aCache = ACache.get(this, cacheDir = false)
+        val aCache = ACache.get(cacheDir = false)
         val defaultUrl = "https://gitee.com/fisher52/YueDuJson/raw/master/myTxtChapterRule.json"
         val cacheUrls: MutableList<String> = aCache
             .getAsString(importTocRuleKey)

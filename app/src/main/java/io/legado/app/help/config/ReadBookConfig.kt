@@ -88,14 +88,14 @@ object ReadBookConfig {
     }
 
     fun upBg(width: Int, height: Int) {
-        val tmp = bg
-        bg = durConfig.curBgDrawable(width, height).apply {
-            if (this is BitmapDrawable) {
-                bgMeanColor = bitmap.getMeanColor()
-            } else if (this is ColorDrawable) {
-                bgMeanColor = color
-            }
+        val drawable = durConfig.curBgDrawable(width, height)
+        if (drawable is BitmapDrawable && drawable.bitmap != null) {
+            bgMeanColor = drawable.bitmap.getMeanColor()
+        } else if (drawable is ColorDrawable) {
+            bgMeanColor = drawable.color
         }
+        val tmp = bg
+        bg = drawable
         (tmp as? BitmapDrawable)?.bitmap?.recycle()
     }
 
@@ -210,6 +210,7 @@ object ReadBookConfig {
             config.paragraphSpacing = value
         }
 
+    //标题位置 0:居左 1:居中 2:隐藏
     var titleMode: Int
         get() = config.titleMode
         set(value) {
@@ -449,7 +450,7 @@ object ReadBookConfig {
         var letterSpacing: Float = 0.1f,//字间距
         var lineSpacingExtra: Int = 12,//行间距
         var paragraphSpacing: Int = 2,//段距
-        var titleMode: Int = 0,//标题居中
+        var titleMode: Int = 0,//标题位置 0:居左 1:居中 2:隐藏
         var titleSize: Int = 0,
         var titleTopSpacing: Int = 0,
         var titleBottomSpacing: Int = 0,
@@ -560,6 +561,9 @@ object ReadBookConfig {
         }
 
         fun curBgDrawable(width: Int, height: Int): Drawable {
+            if (width == 0 || height == 0) {
+                return ColorDrawable(appCtx.getCompatColor(R.color.background))
+            }
             var bgDrawable: Drawable? = null
             val resources = appCtx.resources
             try {

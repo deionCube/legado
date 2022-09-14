@@ -33,10 +33,8 @@ class SearchMenu @JvmOverloads constructor(
     private val callBack: CallBack get() = activity as CallBack
     private val binding = ViewSearchMenuBinding.inflate(LayoutInflater.from(context), this, true)
 
-    private val menuBottomIn: Animation =
-        AnimationUtilsSupport.loadAnimation(context, R.anim.anim_readbook_bottom_in)
-    private val menuBottomOut: Animation =
-        AnimationUtilsSupport.loadAnimation(context, R.anim.anim_readbook_bottom_out)
+    private val menuBottomIn: Animation = loadAnimation(context, R.anim.anim_readbook_bottom_in)
+    private val menuBottomOut: Animation = loadAnimation(context, R.anim.anim_readbook_bottom_out)
     private val bgColor: Int = context.bottomBackground
     private val textColor: Int = context.getPrimaryTextColor(ColorUtils.isColorLight(bgColor))
     private val bottomBackgroundList: ColorStateList =
@@ -148,22 +146,34 @@ class SearchMenu @JvmOverloads constructor(
 
         fabLeft.setOnClickListener {
             updateSearchResultIndex(currentSearchResultIndex - 1)
-            callBack.navigateToSearch(searchResultList[currentSearchResultIndex])
+            callBack.navigateToSearch(
+                searchResultList[currentSearchResultIndex],
+                currentSearchResultIndex
+            )
         }
 
         ivSearchContentUp.setOnClickListener {
             updateSearchResultIndex(currentSearchResultIndex - 1)
-            callBack.navigateToSearch(searchResultList[currentSearchResultIndex])
+            callBack.navigateToSearch(
+                searchResultList[currentSearchResultIndex],
+                currentSearchResultIndex
+            )
         }
 
         ivSearchContentDown.setOnClickListener {
             updateSearchResultIndex(currentSearchResultIndex + 1)
-            callBack.navigateToSearch(searchResultList[currentSearchResultIndex])
+            callBack.navigateToSearch(
+                searchResultList[currentSearchResultIndex],
+                currentSearchResultIndex
+            )
         }
 
         fabRight.setOnClickListener {
             updateSearchResultIndex(currentSearchResultIndex + 1)
-            callBack.navigateToSearch(searchResultList[currentSearchResultIndex])
+            callBack.navigateToSearch(
+                searchResultList[currentSearchResultIndex],
+                currentSearchResultIndex
+            )
         }
     }
 
@@ -225,7 +235,7 @@ class SearchMenu @JvmOverloads constructor(
         fun upSystemUiVisibility()
         fun exitSearchMenu()
         fun showMenuBar()
-        fun navigateToSearch(searchResult: SearchResult)
+        fun navigateToSearch(searchResult: SearchResult, index: Int)
     }
 
 }

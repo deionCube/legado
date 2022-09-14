@@ -17,15 +17,16 @@ import io.legado.app.lib.webdav.Authorization
 import io.legado.app.lib.webdav.WebDav
 import io.legado.app.lib.webdav.WebDavException
 import io.legado.app.lib.webdav.WebDavFile
+import io.legado.app.ui.widget.dialog.WaitDialog
 import io.legado.app.utils.*
+import kotlinx.coroutines.*
 import kotlinx.coroutines.Dispatchers.IO
 import kotlinx.coroutines.Dispatchers.Main
-import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withContext
 import splitties.init.appCtx
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
+import kotlin.coroutines.coroutineContext
 
 /**
  * webDav初始化会访问网络,不要放到主线程
@@ -102,16 +103,26 @@ object AppWebDav {
     suspend fun showRestoreDialog(context: Context) {
         val names = withContext(IO) { getBackupNames() }
         if (names.isNotEmpty()) {
+            coroutineContext.ensureActive()
             withContext(Main) {
                 context.selector(
                     title = context.getString(R.string.select_restore_file),
                     items = names
                 ) { _, index ->
                     if (index in 0 until names.size) {
-                        Coroutine.async {
+                        val waitDialog = WaitDialog(context)
+                        waitDialog.setText("恢复中…")
+                        waitDialog.show()
+                        val task = Coroutine.async {
                             restoreWebDav(names[index])
                         }.onError {
+                            AppLog.put("WebDav恢复出错\n${it.localizedMessage}", it)
                             appCtx.toastOnUi("WebDav恢复出错\n${it.localizedMessage}")
+                        }.onFinally(Main) {
+                            waitDialog.dismiss()
+                        }
+                        waitDialog.setOnCancelListener {
+                            task.cancel()
                         }
                     }
                 }
@@ -185,7 +196,7 @@ object AppWebDav {
             }
         } catch (e: Exception) {
             val msg = "WebDav导出\n${e.localizedMessage}"
-            AppLog.put(msg)
+            AppLog.put(msg, e)
             appCtx.toastOnUi(msg)
         }
     }
@@ -200,7 +211,7 @@ object AppWebDav {
             val url = getProgressUrl(book.name, book.author)
             WebDav(url, authorization).upload(json.toByteArray(), "application/json")
         }.onError {
-            AppLog.put("上传进度失败\n${it.localizedMessage}")
+            AppLog.put("上传进度失败\n${it.localizedMessage}", it)
         }
     }
 
@@ -213,7 +224,7 @@ object AppWebDav {
             val url = getProgressUrl(bookProgress.name, bookProgress.author)
             WebDav(url, authorization).upload(json.toByteArray(), "application/json")
         }.onError {
-            AppLog.put("上传进度失败\n${it.localizedMessage}")
+            AppLog.put("上传进度失败\n${it.localizedMessage}", it)
         }
     }
 

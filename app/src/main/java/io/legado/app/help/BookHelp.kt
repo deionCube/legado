@@ -1,5 +1,7 @@
 package io.legado.app.help
 
+import android.net.Uri
+import androidx.documentfile.provider.DocumentFile
 import io.legado.app.constant.AppLog
 import io.legado.app.constant.AppPattern
 import io.legado.app.constant.EventBus
@@ -15,8 +17,11 @@ import kotlinx.coroutines.Dispatchers.IO
 import org.apache.commons.text.similarity.JaccardSimilarity
 import splitties.init.appCtx
 import java.io.File
+import java.io.FileOutputStream
+import java.io.IOException
 import java.util.concurrent.CopyOnWriteArraySet
 import java.util.regex.Pattern
+import java.util.zip.ZipFile
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
@@ -26,6 +31,7 @@ object BookHelp {
     private val downloadDir: File = appCtx.externalFiles
     private const val cacheFolderName = "book_cache"
     private const val cacheImageFolderName = "images"
+    private const val cacheEpubFolderName = "epub"
     private val downloadImages = CopyOnWriteArraySet<String>()
 
     fun clearCache() {
@@ -39,32 +45,46 @@ object BookHelp {
         FileUtils.delete(filePath)
     }
 
+    fun updateCacheFolder(oldBook: Book, newBook: Book) {
+        val oldFolderPath = FileUtils.getPath(downloadDir, cacheFolderName, oldBook.getFolderName())
+        val newFolderPath = FileUtils.getPath(downloadDir, cacheFolderName, newBook.getFolderName())
+        FileUtils.move(oldFolderPath, newFolderPath)
+    }
+
     /**
      * 清除已删除书的缓存
      */
     suspend fun clearInvalidCache() {
         withContext(IO) {
-            val bookFolderNames = appDb.bookDao.all.map {
-                it.getFolderName()
+            val bookFolderNames = ArrayList<String>()
+            val originNames = ArrayList<String>()
+            appDb.bookDao.all.forEach {
+                bookFolderNames.add(it.getFolderName())
+                if (it.isEpub()) originNames.add(it.originName)
             }
-            val file = downloadDir.getFile(cacheFolderName)
-            file.listFiles()?.forEach { bookFile ->
-                if (!bookFolderNames.contains(bookFile.name)) {
-                    FileUtils.delete(bookFile.absolutePath)
+            downloadDir.getFile(cacheFolderName)
+                .listFiles()?.forEach { bookFile ->
+                    if (!bookFolderNames.contains(bookFile.name)) {
+                        FileUtils.delete(bookFile.absolutePath)
+                    }
                 }
-            }
+            downloadDir.getFile(cacheEpubFolderName)
+                .listFiles()?.forEach { epubFile ->
+                    if (!originNames.contains(epubFile.name)) {
+                        FileUtils.delete(epubFile.absolutePath)
+                    }
+                }
         }
     }
 
     suspend fun saveContent(
-        scope: CoroutineScope,
         bookSource: BookSource,
         book: Book,
         bookChapter: BookChapter,
         content: String
     ) {
         saveText(book, bookChapter, content)
-        saveImages(scope, bookSource, book, bookChapter, content)
+        saveImages(bookSource, book, bookChapter, content)
         postEvent(EventBus.SAVE_CONTENT, bookChapter)
     }
 
@@ -84,19 +104,18 @@ object BookHelp {
     }
 
     private suspend fun saveImages(
-        scope: CoroutineScope,
         bookSource: BookSource,
         book: Book,
         bookChapter: BookChapter,
         content: String
-    ) {
+    ) = coroutineScope {
         val awaitList = arrayListOf<Deferred<Unit>>()
         content.split("\n").forEach {
             val matcher = AppPattern.imgPattern.matcher(it)
             if (matcher.find()) {
                 matcher.group(1)?.let { src ->
                     val mSrc = NetworkUtils.getAbsoluteURL(bookChapter.url, src)
-                    awaitList.add(scope.async {
+                    awaitList.add(async {
                         saveImage(bookSource, book, mSrc)
                     })
                 }
@@ -150,6 +169,27 @@ object BookHelp {
             suffix = "jpg"
         }
         return suffix
+    }
+
+    @Throws(IOException::class)
+    fun getEpubFile(book: Book): ZipFile {
+        val uri = Uri.parse(book.bookUrl)
+        if (uri.isContentScheme()) {
+            FileUtils.createFolderIfNotExist(downloadDir, cacheEpubFolderName)
+            val path = FileUtils.getPath(downloadDir, cacheEpubFolderName, book.originName)
+            val file = File(path)
+            val doc = DocumentFile.fromSingleUri(appCtx, uri)
+                ?: throw IOException("文件不存在")
+            if (!file.exists() || doc.lastModified() > book.latestChapterTime) {
+                LocalBook.getBookInputStream(book).use { inputStream ->
+                    FileOutputStream(file).use { outputStream ->
+                        inputStream.copyTo(outputStream)
+                    }
+                }
+            }
+            return ZipFile(file)
+        }
+        return ZipFile(uri.path)
     }
 
     fun getChapterFiles(book: Book): List<String> {

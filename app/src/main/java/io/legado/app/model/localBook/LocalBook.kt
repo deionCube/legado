@@ -6,6 +6,7 @@ import androidx.documentfile.provider.DocumentFile
 import com.script.SimpleBindings
 import io.legado.app.R
 import io.legado.app.constant.AppConst
+import io.legado.app.constant.AppLog
 import io.legado.app.data.appDb
 import io.legado.app.data.entities.BaseSource
 import io.legado.app.data.entities.Book
@@ -16,6 +17,7 @@ import io.legado.app.help.BookHelp
 import io.legado.app.help.config.AppConfig
 import io.legado.app.model.analyzeRule.AnalyzeUrl
 import io.legado.app.utils.*
+import org.jsoup.nodes.Entities
 import splitties.init.appCtx
 import java.io.*
 import java.util.regex.Pattern
@@ -76,12 +78,16 @@ object LocalBook {
         if (chapters.isEmpty()) {
             throw TocEmptyException(appCtx.getString(R.string.chapter_list_empty))
         }
-        val lh = LinkedHashSet(chapters)
-        return ArrayList(lh)
+        val list = ArrayList(LinkedHashSet(chapters))
+        list.forEachIndexed { index, bookChapter -> bookChapter.index = index }
+        book.latestChapterTitle = list.last().title
+        book.totalChapterNum = list.size
+        book.save()
+        return list
     }
 
     fun getContent(book: Book, chapter: BookChapter): String? {
-        return try {
+        val content = try {
             when {
                 book.isEpub() -> {
                     EpubFile.getContent(book, chapter)
@@ -95,8 +101,15 @@ object LocalBook {
             }
         } catch (e: Exception) {
             e.printOnDebug()
-            e.localizedMessage
-        }
+            AppLog.put("获取本地书籍内容失败\n${e.localizedMessage}", e)
+            "获取本地书籍内容失败\n${e.localizedMessage}"
+        }?.replace("&lt;img", "&lt; img", true)
+        content ?: return null
+        return kotlin.runCatching {
+            Entities.unescape(content)
+        }.onFailure {
+            AppLog.put("HTML实体解码失败\n${it.localizedMessage}", it)
+        }.getOrElse { content }
     }
 
     /**
@@ -142,7 +155,8 @@ object LocalBook {
                     "covers",
                     "${MD5Utils.md5Encode16(bookUrl)}.jpg"
                 ),
-                latestChapterTime = updateTime
+                latestChapterTime = updateTime,
+                order = appDb.bookDao.minOrder - 1
             )
             if (book.isEpub()) EpubFile.upBookInfo(book)
             if (book.isUmd()) UmdFile.upBookInfo(book)
@@ -221,8 +235,8 @@ object LocalBook {
         AppConfig.defaultBookTreeUri
             ?: throw NoStackTraceException("没有设置书籍保存位置!")
         val bytes = when {
-            str.isAbsUrl() -> AnalyzeUrl(str, source = source).getByteArray()
-            str.isDataUrl() -> Base64.decode(str.substringAfter("base64,"), Base64.DEFAULT)
+            str.isAbsUrl() -> AnalyzeUrl(str, source = source).getInputStream()
+            str.isDataUrl() -> ByteArrayInputStream(Base64.decode(str.substringAfter("base64,"), Base64.DEFAULT))
             else -> throw NoStackTraceException("在线导入书籍支持http/https/DataURL")
         }
         return saveBookFile(bytes, fileName)
@@ -243,7 +257,7 @@ object LocalBook {
     }
 
     fun saveBookFile(
-        bytes: ByteArray,
+        inputStream: InputStream,
         fileName: String
     ): Uri {
         val defaultBookTreeUri = AppConfig.defaultBookTreeUri
@@ -257,14 +271,14 @@ object LocalBook {
                     ?: throw SecurityException("Permission Denial")
             }
             appCtx.contentResolver.openOutputStream(doc.uri)!!.use { oStream ->
-                oStream.write(bytes)
+                inputStream.copyTo(oStream)
             }
             doc.uri
         } else {
             val treeFile = File(treeUri.path!!)
             val file = treeFile.getFile(fileName)
             FileOutputStream(file).use { oStream ->
-                oStream.write(bytes)
+                inputStream.copyTo(oStream)
             }
             Uri.fromFile(file)
         }

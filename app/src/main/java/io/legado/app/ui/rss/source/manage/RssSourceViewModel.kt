@@ -83,7 +83,7 @@ class RssSourceViewModel(application: Application) : BaseViewModel(application) 
         }.onSuccess {
             success.invoke(it)
         }.onError {
-            context.toastOnUi(it.msg)
+            context.toastOnUi(it.stackTraceStr)
         }
     }
 
@@ -130,6 +130,13 @@ class RssSourceViewModel(application: Application) : BaseViewModel(application) 
     fun importDefault() {
         execute {
             DefaultData.importDefaultRssSources()
+        }
+    }
+
+    fun disable(rssSource: RssSource) {
+        execute {
+            rssSource.enabled = false
+            appDb.rssSourceDao.update(rssSource)
         }
     }
 

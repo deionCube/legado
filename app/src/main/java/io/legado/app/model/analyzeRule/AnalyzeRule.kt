@@ -667,7 +667,7 @@ class AnalyzeRule(
                 log("ajax(${urlStr}) error\n${it.stackTraceToString()}")
                 it.printOnDebug()
             }.getOrElse {
-                it.msg
+                it.stackTraceStr
             }
         }
     }
@@ -682,27 +682,6 @@ class AnalyzeRule(
             return "${matcher.group(1)}${StringUtils.stringToInt(matcher.group(2))}${matcher.group(3)}"
         }
         return s
-    }
-
-    /**
-     * 更新BookUrl,如果搜索结果有tocUrl也会更新,有些书源bookUrl定期更新,可以在js内调用更新
-     */
-    fun refreshBookUrl() {
-        runBlocking {
-            val bookSource = source as? BookSource
-            val book = book as? Book
-            if (bookSource == null || book == null) return@runBlocking
-            val books = WebBook.searchBookAwait(this, bookSource, book.name)
-            books.forEach {
-                if (it.name == book.name && it.author == book.author) {
-                    book.bookUrl = it.bookUrl
-                    if (it.tocUrl.isNotBlank()) {
-                        book.tocUrl = it.tocUrl
-                    }
-                    return@runBlocking
-                }
-            }
-        }
     }
 
     /**
@@ -721,7 +700,21 @@ class AnalyzeRule(
                             book.putVariable(entry.key, entry.value)
                         }
                     }
-                WebBook.getBookInfoAwait(this, bookSource, book, false)
+                WebBook.getBookInfoAwait(bookSource, book, false)
+            }
+        }
+    }
+
+    /**
+     * 刷新详情页
+     */
+    fun refreshBook() {
+        val bookSource = source as? BookSource
+        val book = book as? Book
+        if (bookSource == null || book == null) return
+        runBlocking {
+            withTimeout(1800000) {
+                WebBook.getBookInfoAwait(bookSource, book)
             }
         }
     }
@@ -735,7 +728,7 @@ class AnalyzeRule(
         if (bookSource == null || book == null) return
         runBlocking {
             withTimeout(1800000) {
-                WebBook.getBookInfoAwait(this, bookSource, book)
+                WebBook.getBookInfoAwait(bookSource, book)
             }
         }
     }

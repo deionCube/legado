@@ -21,6 +21,7 @@ import io.legado.app.data.entities.BookChapter
 import io.legado.app.data.entities.BookSource
 import io.legado.app.databinding.ActivityBookInfoBinding
 import io.legado.app.databinding.DialogEditTextBinding
+import io.legado.app.help.config.AppConfig
 import io.legado.app.lib.dialogs.alert
 import io.legado.app.lib.theme.backgroundColor
 import io.legado.app.lib.theme.bottomBackground
@@ -216,9 +217,9 @@ class BookInfoActivity :
                             toastOnUi(getString(R.string.upload_book_success))
                         else
                             toastOnUi(getString(R.string.upload_book_fail))
-                    }catch (e : Exception){
+                    } catch (e: Exception) {
                         toastOnUi(e.localizedMessage)
-                    }finally {
+                    } finally {
                         waitDialog.dismiss()
                     }
                 }
@@ -247,8 +248,10 @@ class BookInfoActivity :
 
     private fun showCover(book: Book) {
         binding.ivCover.load(book.getDisplayCover(), book.name, book.author, false, book.origin)
-        BookCover.loadBlur(this, book.getDisplayCover())
-            .into(binding.bgBook)
+        if(!AppConfig.isEInkMode) {
+            BookCover.loadBlur(this, book.getDisplayCover())
+                .into(binding.bgBook)
+        }
     }
 
     private fun upLoading(isLoading: Boolean, chapterList: List<BookChapter>? = null) {
@@ -271,6 +274,8 @@ class BookInfoActivity :
                     } else {
                         binding.tvToc.text = getString(R.string.toc_s, chapterList.last().title)
                     }
+                    binding.tvLasted.text =
+                        getString(R.string.lasted_show, chapterList.last().title)
                 }
             }
         }

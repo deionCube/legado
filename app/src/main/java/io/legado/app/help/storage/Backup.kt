@@ -7,19 +7,23 @@ import io.legado.app.constant.AppLog
 import io.legado.app.constant.PreferKey
 import io.legado.app.data.appDb
 import io.legado.app.help.AppWebDav
+import io.legado.app.help.DirectLinkUpload
 import io.legado.app.help.config.LocalConfig
 import io.legado.app.help.config.ReadBookConfig
 import io.legado.app.help.config.ThemeConfig
 import io.legado.app.help.coroutine.Coroutine
 import io.legado.app.utils.*
 import kotlinx.coroutines.Dispatchers.IO
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import splitties.init.appCtx
 import java.io.File
 import java.io.FileOutputStream
 import java.util.concurrent.TimeUnit
 
-
+/**
+ * 备份
+ */
 object Backup {
 
     val backupPath: String by lazy {
@@ -41,6 +45,7 @@ object Backup {
             "txtTocRule.json",
             "httpTTS.json",
             "keyboardAssists.json",
+            DirectLinkUpload.ruleFileName,
             ReadBookConfig.configFileName,
             ReadBookConfig.shareConfigFileName,
             ThemeConfig.configFileName,
@@ -73,6 +78,7 @@ object Backup {
             writeListToJson(appDb.bookSourceDao.all, "bookSource.json", backupPath)
             writeListToJson(appDb.rssSourceDao.all, "rssSources.json", backupPath)
             writeListToJson(appDb.rssStarDao.all, "rssStar.json", backupPath)
+            ensureActive()
             writeListToJson(appDb.replaceRuleDao.all, "replaceRule.json", backupPath)
             writeListToJson(appDb.readRecordDao.all, "readRecord.json", backupPath)
             writeListToJson(appDb.searchKeywordDao.all, "searchHistory.json", backupPath)
@@ -80,6 +86,7 @@ object Backup {
             writeListToJson(appDb.txtTocRuleDao.all, "txtTocRule.json", backupPath)
             writeListToJson(appDb.httpTTSDao.all, "httpTTS.json", backupPath)
             writeListToJson(appDb.keyboardAssistsDao.all, "keyboardAssists.json", backupPath)
+            ensureActive()
             GSON.toJson(ReadBookConfig.configList).let {
                 FileUtils.createFileIfNotExist(backupPath + File.separator + ReadBookConfig.configFileName)
                     .writeText(it)
@@ -92,7 +99,12 @@ object Backup {
                 FileUtils.createFileIfNotExist(backupPath + File.separator + ThemeConfig.configFileName)
                     .writeText(it)
             }
-            Preferences.getSharedPreferences(appCtx, backupPath, "config")?.let { sp ->
+            DirectLinkUpload.getConfig()?.let {
+                FileUtils.createFileIfNotExist(backupPath + File.separator + DirectLinkUpload.ruleFileName)
+                    .writeText(GSON.toJson(it))
+            }
+            ensureActive()
+            appCtx.getSharedPreferences(backupPath, "config")?.let { sp ->
                 val edit = sp.edit()
                 appCtx.defaultSharedPreferences.all.forEach { (key, value) ->
                     if (BackupConfig.keyIsNotIgnore(key)) {
@@ -107,6 +119,7 @@ object Backup {
                 }
                 edit.commit()
             }
+            ensureActive()
             when {
                 path.isNullOrBlank() -> {
                     copyBackup(context.getExternalFilesDir(null)!!, false)

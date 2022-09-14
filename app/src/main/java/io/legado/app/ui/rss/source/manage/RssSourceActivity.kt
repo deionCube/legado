@@ -12,7 +12,6 @@ import androidx.recyclerview.widget.ItemTouchHelper
 import io.legado.app.R
 import io.legado.app.base.VMBaseActivity
 import io.legado.app.constant.AppLog
-import io.legado.app.constant.AppPattern
 import io.legado.app.data.appDb
 import io.legado.app.data.entities.RssSource
 import io.legado.app.databinding.ActivityRssSourceBinding
@@ -50,6 +49,9 @@ class RssSourceActivity : VMBaseActivity<ActivityRssSourceBinding, RssSourceView
     override val viewModel by viewModels<RssSourceViewModel>()
     private val importRecordKey = "rssSourceRecordKey"
     private val adapter by lazy { RssSourceAdapter(this, this) }
+    private val searchView: SearchView by lazy {
+        binding.titleBar.findViewById(R.id.search_view)
+    }
     private var sourceFlowJob: Job? = null
     private var groups = hashSetOf<String>()
     private var groupMenu: SubMenu? = null
@@ -120,10 +122,21 @@ class RssSourceActivity : VMBaseActivity<ActivityRssSourceBinding, RssSourceView
             R.id.menu_import_qr -> qrCodeResult.launch()
             R.id.menu_group_manage -> showDialogFragment<GroupManageDialog>()
             R.id.menu_import_default -> viewModel.importDefault()
+            R.id.menu_enabled_group -> {
+                searchView.setQuery(getString(R.string.enabled), true)
+            }
+            R.id.menu_disabled_group -> {
+                searchView.setQuery(getString(R.string.disabled), true)
+            }
+            R.id.menu_group_login -> {
+                searchView.setQuery(getString(R.string.need_login), true)
+            }
+            R.id.menu_group_null -> {
+                searchView.setQuery(getString(R.string.no_group), true)
+            }
             R.id.menu_help -> showHelp()
             else -> if (item.groupId == R.id.source_group) {
-                binding.titleBar.findViewById<SearchView>(R.id.search_view)
-                    .setQuery("group:${item.title}", true)
+                searchView.setQuery("group:${item.title}", true)
             }
         }
         return super.onCompatOptionsItemSelected(item)
@@ -144,6 +157,7 @@ class RssSourceActivity : VMBaseActivity<ActivityRssSourceBinding, RssSourceView
             R.id.menu_share_source -> viewModel.saveToFile(adapter.selection) {
                 share(it)
             }
+            R.id.menu_check_selected_interval -> adapter.checkSelectedInterval()
         }
         return true
     }
@@ -191,11 +205,9 @@ class RssSourceActivity : VMBaseActivity<ActivityRssSourceBinding, RssSourceView
 
     private fun initGroupFlow() {
         launch {
-            appDb.rssSourceDao.flowGroup().conflate().collect {
+            appDb.rssSourceDao.flowGroups().conflate().collect {
                 groups.clear()
-                it.map { group ->
-                    groups.addAll(group.splitNotBlank(AppPattern.splitGroupRegex))
-                }
+                groups.addAll(it)
                 upGroupMenu()
             }
         }
@@ -240,6 +252,18 @@ class RssSourceActivity : VMBaseActivity<ActivityRssSourceBinding, RssSourceView
                 searchKey.isNullOrBlank() -> {
                     appDb.rssSourceDao.flowAll()
                 }
+                searchKey == getString(R.string.enabled) -> {
+                    appDb.rssSourceDao.flowEnabled()
+                }
+                searchKey == getString(R.string.disabled) -> {
+                    appDb.rssSourceDao.flowDisabled()
+                }
+                searchKey == getString(R.string.need_login) -> {
+                    appDb.rssSourceDao.flowLogin()
+                }
+                searchKey == getString(R.string.no_group) -> {
+                    appDb.rssSourceDao.flowNoGroup()
+                }
                 searchKey.startsWith("group:") -> {
                     val key = searchKey.substringAfter("group:")
                     appDb.rssSourceDao.flowGroupSearch(key)
@@ -270,7 +294,7 @@ class RssSourceActivity : VMBaseActivity<ActivityRssSourceBinding, RssSourceView
 
     @SuppressLint("InflateParams")
     private fun showImportDialog() {
-        val aCache = ACache.get(this, cacheDir = false)
+        val aCache = ACache.get(cacheDir = false)
         val cacheUrls: MutableList<String> = aCache
             .getAsString(importRecordKey)
             ?.splitNotBlank(",")
@@ -302,7 +326,13 @@ class RssSourceActivity : VMBaseActivity<ActivityRssSourceBinding, RssSourceView
     }
 
     override fun del(source: RssSource) {
-        viewModel.del(source)
+        alert(R.string.draw) {
+            setMessage(getString(R.string.sure_del) + "\n" + source.sourceName)
+            noButton()
+            yesButton {
+                viewModel.del(source)
+            }
+        }
     }
 
     override fun edit(source: RssSource) {
